@@ -33,6 +33,15 @@ module LinkedIn
       Faraday::ConnectionFailed
     ].freeze
 
+    # Retries are performed here rather than by Faraday middleware. Middleware
+    # retries are invisible to the request budget: one reservation would cover
+    # up to three requests LinkedIn actually receives, so the daily count and
+    # the spacing between calls would both understate reality precisely when
+    # things are going wrong. Retrying at this level means every attempt
+    # reserves its own slot and is recorded.
+    MAX_RETRIES = 2
+    RETRY_BACKOFF = 0.5
+
     # LinkedIn expires a cookie by setting this literal value with Max-Age=0.
     DELETION_MARKER = "delete me".freeze
 
@@ -54,8 +63,6 @@ module LinkedIn
     #   client.get("identity/dash/profiles", q: "memberIdentity", ...)
     def get(path, params = {}, accept: "application/json")
       perform(path, params, accept, MAX_REDIRECTS)
-    rescue Faraday::TimeoutError, Faraday::ConnectionFailed => e
-      raise UpstreamError, "could not reach LinkedIn: #{e.class}"
     end
 
     # Cheap authenticated call used by the health endpoint to report whether
@@ -72,23 +79,7 @@ module LinkedIn
     attr_reader :config, :jar, :budget
 
     def perform(path, params, accept, redirects_left)
-      # Blocks for the configured spacing, or refuses if the daily budget is
-      # gone. Every hop counts, redirects included, because every hop is a
-      # request LinkedIn sees.
-      budget.acquire!
-
-      response = begin
-        connection.get(File.join(API_PREFIX, path), params) do |request|
-          request.headers["cookie"] = cookie_header
-          request.headers["csrf-token"] = csrf_token
-          request.headers["accept"] = accept
-        end
-      rescue Faraday::TimeoutError, Faraday::ConnectionFailed
-        budget.record(path: path, outcome: "transport_error")
-        raise
-      end
-
-      budget.record(path: path, status: response.status, outcome: outcome_for(response))
+      response = request_with_retries(path, params, accept)
       absorb_cookies(response)
 
       return handle(response) unless response.status.between?(300, 399)
@@ -103,6 +94,35 @@ module LinkedIn
       # The Location is the same URL; the point of the round trip was the new
       # cookie, which we now hold, so replay the original request.
       perform(path, params, accept, redirects_left - 1)
+    end
+
+    # Every attempt — first try and each retry alike — reserves its own slot
+    # in the budget before leaving and is settled with its outcome after, so
+    # the daily count and the spacing reflect what LinkedIn actually received.
+    def request_with_retries(path, params, accept)
+      attempt = 0
+
+      loop do
+        attempt += 1
+        reservation = budget.reserve!(path)
+
+        begin
+          response = connection.get(File.join(API_PREFIX, path), params) do |request|
+            request.headers["cookie"] = cookie_header
+            request.headers["csrf-token"] = csrf_token
+            request.headers["accept"] = accept
+          end
+
+          budget.settle(reservation, status: response.status, outcome: outcome_for(response))
+          return response unless RETRIABLE_STATUSES.include?(response.status)
+          raise UpstreamError, "LinkedIn returned HTTP #{response.status}" if attempt > MAX_RETRIES
+        rescue *RETRIABLE_EXCEPTIONS => e
+          budget.settle(reservation, outcome: "transport_error")
+          raise UpstreamError, "could not reach LinkedIn: #{e.class}" if attempt > MAX_RETRIES
+        end
+
+        sleep(RETRY_BACKOFF * (2**(attempt - 1)))
+      end
     end
 
     def outcome_for(response)
@@ -175,13 +195,9 @@ module LinkedIn
     # --- transport ------------------------------------------------------
 
     def connection
+      # Deliberately no retry middleware: retries happen in
+      # #request_with_retries so the budget sees every attempt.
       @connection ||= Faraday.new(url: BASE_URL, headers: static_headers) do |f|
-        f.request :retry,
-                  max: 2,
-                  interval: 0.5,
-                  backoff_factor: 2,
-                  retry_statuses: RETRIABLE_STATUSES,
-                  exceptions: RETRIABLE_EXCEPTIONS
         f.options.open_timeout = config.open_timeout
         f.options.timeout = config.read_timeout
         f.adapter Faraday.default_adapter
