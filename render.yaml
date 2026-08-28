@@ -1,0 +1,48 @@
+# Render Blueprint.
+#
+# Deploys the Dockerfile as a single web service. There is no database here on
+# purpose: the instance is ephemeral and the free plan has no persistent disk,
+# so DATABASE_URL points at an externally managed Postgres. That keeps the
+# profile cache and the outbound request log — which is what enforces the daily
+# LinkedIn budget — alive across restarts and redeploys.
+services:
+  - type: web
+    name: linkedin-profile-api
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /up
+
+    envVars:
+      # Rails 8 serves through Thruster, which listens on HTTP_PORT (default
+      # 80). Render assigns 10000 and only "usually" auto-detects anything
+      # else, so bind it explicitly rather than rely on detection.
+      - key: HTTP_PORT
+        value: "10000"
+
+      - key: RAILS_ENV
+        value: production
+
+      # A profile costs six upstream calls, so this interval dominates
+      # uncached response time. 1.0s keeps a cache miss around seven seconds.
+      - key: LINKEDIN_MIN_REQUEST_INTERVAL
+        value: "1.0"
+
+      # Ceiling on calls to LinkedIn per day: roughly 16 uncached profiles.
+      - key: LINKEDIN_DAILY_REQUEST_LIMIT
+        value: "100"
+
+      - key: THROTTLE_REQUESTS_PER_MINUTE
+        value: "20"
+
+      # Set by hand in the Render dashboard; never stored in this repository.
+      - key: RAILS_MASTER_KEY
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: LINKEDIN_COOKIE
+        sync: false
+      - key: LINKEDIN_USER_AGENT
+        sync: false
