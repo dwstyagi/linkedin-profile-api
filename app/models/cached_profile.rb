@@ -67,13 +67,15 @@ class CachedProfile < ApplicationRecord
   # derive ourselves, but that is not provable from the call site, and a
   # string-built query here would be indistinguishable from one that is
   # genuinely unsafe.
+  #
+  # Sent through the driver rather than exec_query because pg_advisory_lock
+  # returns void, and Active Record's result type-casting logs "unknown OID
+  # 2278" for it on every call. The lock works either way; this keeps the
+  # logs readable.
   def self.advisory(function, key)
     sql = function == "pg_advisory_lock" ? "SELECT pg_advisory_lock($1, $2)" : "SELECT pg_advisory_unlock($1, $2)"
 
-    connection.exec_query(sql, "advisory lock", [
-      ActiveRecord::Relation::QueryAttribute.new("namespace", LOCK_NAMESPACE, ActiveRecord::Type::Integer.new),
-      ActiveRecord::Relation::QueryAttribute.new("key", key, ActiveRecord::Type::Integer.new)
-    ])
+    connection.raw_connection.exec_params(sql, [ LOCK_NAMESPACE, key ])
   end
   private_class_method :advisory
 

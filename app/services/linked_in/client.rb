@@ -28,9 +28,13 @@ module LinkedIn
     # Retrying an auth failure or a throttle just burns the session faster,
     # so only transient transport-level problems are retried.
     RETRIABLE_STATUSES = [ 500, 502, 503, 504 ].freeze
+    # Faraday::SSLError descends from Faraday::Error rather than
+    # ConnectionFailed, so it has to be named explicitly. A TLS handshake can
+    # fail transiently, so it is worth one retry.
     RETRIABLE_EXCEPTIONS = [
       Faraday::TimeoutError,
-      Faraday::ConnectionFailed
+      Faraday::ConnectionFailed,
+      Faraday::SSLError
     ].freeze
 
     # Retries are performed here rather than by Faraday middleware. Middleware
@@ -119,6 +123,13 @@ module LinkedIn
         rescue *RETRIABLE_EXCEPTIONS => e
           budget.settle(reservation, outcome: "transport_error")
           raise UpstreamError, "could not reach LinkedIn: #{e.class}" if attempt > MAX_RETRIES
+        rescue Faraday::Error => e
+          # Any other transport failure is not worth retrying, but it still
+          # has to settle its reservation and surface as an upstream error.
+          # Left unhandled it would escape as a 500 and strand the
+          # reservation as pending, quietly consuming the day's budget.
+          budget.settle(reservation, outcome: "transport_error")
+          raise UpstreamError, "could not reach LinkedIn: #{e.class}"
         end
 
         sleep(RETRY_BACKOFF * (2**(attempt - 1)))
