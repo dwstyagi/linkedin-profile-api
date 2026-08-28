@@ -8,6 +8,26 @@ It works by calling LinkedIn's own internal **Voyager** API — the endpoints th
 
 ---
 
+## Live API
+
+**https://linkedin-profile-api-e2mx.onrender.com**
+
+Note the `-e2mx` suffix — it is part of the hostname, not a typo. Render subdomains are claimed globally and the unsuffixed name belongs to an unrelated application.
+
+```bash
+curl -H "X-API-Key: $API_KEY" \
+  "https://linkedin-profile-api-e2mx.onrender.com/api/v1/profile?url=https://www.linkedin.com/in/diwanshu-tyagi"
+```
+
+Two things to expect on a first look:
+
+- **The API key goes in an `X-API-Key` header.** Without it every request returns `401`. The key was supplied with this submission.
+- **The instance sleeps.** It is hosted on a free tier that spins down after 15 minutes of inactivity, and the first request afterwards can take up to a minute while it wakes. That is the host, not the API. An uncached profile then takes a further 7–10 seconds, because it makes six upstream calls with deliberate spacing; the same profile requested again returns from cache in well under a second.
+
+`GET /` needs no key and confirms you have reached the right service.
+
+---
+
 ## Contents
 
 - [Quick start](#quick-start)
