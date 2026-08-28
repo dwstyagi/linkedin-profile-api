@@ -22,7 +22,9 @@ curl -H "X-API-Key: $API_KEY" \
 Two things to expect on a first look:
 
 - **The API key goes in an `X-API-Key` header.** Without it every request returns `401`. The key was supplied with this submission.
-- **The instance sleeps.** It is hosted on a free tier that spins down after 15 minutes of inactivity, and the first request afterwards can take up to a minute while it wakes. That is the host, not the API. An uncached profile then takes a further 7–10 seconds, because it makes six upstream calls with deliberate spacing; the same profile requested again returns from cache in well under a second.
+- **An uncached profile takes 7–10 seconds.** It makes six upstream calls with deliberate spacing to protect the LinkedIn session. The same profile requested again returns from cache in well under a second — that contrast is the cache working, not variance.
+
+The host is a free tier that spins down after 15 minutes of inactivity, so an uptime monitor pings `/up` every five minutes to keep it warm. Should that lapse, the first request afterwards takes up to a minute while the instance wakes; that is the host, not the API.
 
 `GET /` needs no key and confirms you have reached the right service.
 
@@ -389,9 +391,11 @@ The container's entrypoint runs `db:prepare` on boot, so migrations apply and th
 
 ### A note on the free tier
 
-Render spins a free service down after 15 minutes without traffic, and waking it takes around a minute. The free allowance is 750 instance hours per calendar month, which is just above the ~730 hours in a month — so an uptime monitor pinging `/up` every few minutes keeps the service warm and stays inside the allowance, at the cost of leaving no room for a second free service on the same account.
+Render spins a free service down after 15 minutes without traffic, and waking it takes around a minute. An uptime monitor therefore pings `/up` every five minutes, comfortably inside that window, so the service stays warm and no request pays a cold start.
 
-If you are evaluating this and the first request hangs, that is the instance waking rather than the API failing. Subsequent requests are immediate.
+`/up` is the right target for that: it is unauthenticated and makes no upstream calls, so keeping the instance alive costs nothing from the LinkedIn request budget.
+
+The constraint to respect is the free allowance of 750 instance hours per calendar month. A 31-day month is 744 hours, so one service kept awake around the clock fits — with six hours to spare and no room for a second free service on the same account. Exceeding the allowance suspends the service, which is a worse failure than a cold start, so it is worth not adding anything else alongside it.
 
 No secret is stored in this repository. `.env` is gitignored; `.env.example` documents every variable with empty values.
 
