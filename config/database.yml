@@ -1,0 +1,24 @@
+# PostgreSQL.
+#
+# Development and test use a local server. Production reads DATABASE_URL, which
+# is supplied by the host — the deployed instance points at a managed Postgres
+# rather than a database co-located with the app, so the cache and the request
+# log survive restarts and redeploys of an ephemeral container.
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+
+development:
+  <<: *default
+  database: linkedin_api_development
+
+# Warning: The database defined as "test" will be erased and re-generated
+# from your development database when you run "rake".
+test:
+  <<: *default
+  database: linkedin_api_test
+
+production:
+  <<: *default
+  url: <%= ENV["DATABASE_URL"] %>

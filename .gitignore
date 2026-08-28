@@ -1,0 +1,25 @@
+# Secrets. The LinkedIn session cookie lives here and must never be committed.
+.env
+.env.*
+!.env.example
+
+/.bundle
+/log/*
+/tmp/*
+!/log/.keep
+!/tmp/.keep
+/tmp/pids/*
+!/tmp/pids/
+!/tmp/pids/.keep
+/storage/*
+!/storage/.keep
+
+/config/master.key
+/config/credentials/*.key
+
+/public/assets
+.byebug_history
+.DS_Store
+
+# Raw payloads captured during recon; they contain real profile data.
+/tmp/recon
