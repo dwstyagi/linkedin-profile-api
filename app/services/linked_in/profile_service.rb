@@ -35,7 +35,19 @@ module LinkedIn
       CachedProfile.fresh.find_by(public_identifier: parsed.public_identifier)
     end
 
+    # Serialized per profile, so two simultaneous misses for the same person
+    # do not both spend six upstream requests. The loser of the race waits,
+    # then finds the winner's freshly written cache entry on the re-check.
     def fetch_and_store(parsed)
+      CachedProfile.with_slug_lock(parsed.public_identifier) do
+        cached = cached_profile_for(parsed)
+        next result_for(cached, cached: true) if cached
+
+        fetch_and_store!(parsed)
+      end
+    end
+
+    def fetch_and_store!(parsed)
       raw_payload = ProfileFetcher.new(parsed.public_identifier).call
 
       data = ProfileNormalizer.new(
