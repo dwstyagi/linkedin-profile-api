@@ -1,0 +1,6 @@
+# Intentionally empty.
+#
+# Its presence makes `fixtures :all` truncate cached_profiles before each test,
+# so the suite starts from a known-empty cache no matter what left rows behind
+# (bin/ci seeds the test database as part of its "Tests: Seeds" step). Tests
+# that need a cached profile create it themselves.
