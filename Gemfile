@@ -40,7 +40,7 @@ end
 
 # HTTP client used to call LinkedIn's internal Voyager endpoints directly.
 # No browser or automation driver is used anywhere in this application.
-gem "faraday", "~> 2.9"
+gem "faraday", "~> 2.15"
 gem "faraday-retry", "~> 2.2"
 
 # Throttles inbound requests so the upstream LinkedIn session is not burned.
